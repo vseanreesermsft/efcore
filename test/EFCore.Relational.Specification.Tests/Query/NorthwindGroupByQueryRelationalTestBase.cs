@@ -21,33 +21,6 @@ namespace Microsoft.EntityFrameworkCore.Query
 
         [ConditionalTheory]
         [MemberData(nameof(IsAsyncData))]
-        public virtual async Task Select_uncorrelated_collection_with_groupby_when_outer_is_distinct(bool async)
-        {
-            var message = (await Assert.ThrowsAsync<InvalidOperationException>(
-                () => AssertQuery(
-                async,
-                ss => ss.Set<Order>()
-                    .Where(c => c.CustomerID.StartsWith("A"))
-                    .Select(c => c.Customer.City)
-                    .Distinct()
-                    .Select(c => new
-                    {
-                        c1 = ss.Set<Product>().GroupBy(p => p.ProductID).Select(g => g.Key).ToArray(),
-                        c2 = ss.Set<Product>().GroupBy(p => p.ProductID).Select(g => g.Count()).ToArray()
-                    }),
-                assertOrder: true,
-                elementAsserter: (e, a) =>
-                {
-                    AssertCollection(e.c1, a.c1);
-                    AssertCollection(e.c2, a.c2);
-                }))).Message;
-
-            Assert.Equal(RelationalStrings.InsufficientInformationToIdentifyOuterElementOfCollectionJoin, message);
-        }
-
-
-        [ConditionalTheory]
-        [MemberData(nameof(IsAsyncData))]
         public virtual async Task Complex_query_with_groupBy_in_subquery4(bool async)
         {
             var message = (await Assert.ThrowsAsync<InvalidOperationException>(
@@ -70,28 +43,7 @@ namespace Microsoft.EntityFrameworkCore.Query
                     AssertCollection(e.Subquery, a.Subquery);
                 }))).Message;
 
-            Assert.Equal(RelationalStrings.MissingIdentifyingProjectionInDistinctGroupBySubquery("o.OrderID"), message);
-        }
-
-
-        [ConditionalTheory]
-        [MemberData(nameof(IsAsyncData))]
-        public virtual async Task Select_nested_collection_with_distinct(bool async)
-        {
-            var message = (await Assert.ThrowsAsync<InvalidOperationException>(
-                () => AssertQuery(
-                async,
-                ss => ss.Set<Customer>()
-                    .OrderBy(c => c.CustomerID)
-                    .Where(c => c.CustomerID.StartsWith("A"))
-                    .Select(
-                        c => c.Orders.Any()
-                            ? c.Orders.Select(o => o.CustomerID).Distinct().ToArray()
-                            : Array.Empty<string>()),
-                assertOrder: true,
-                elementAsserter: (e, a) => AssertCollection(e, a)))).Message;
-
-            Assert.Equal(RelationalStrings.MissingIdentifyingProjectionInDistinctGroupBySubquery("o.OrderID"), message);
+            Assert.Equal(RelationalStrings.UnableToTranslateSubqueryWithGroupBy("o.OrderID"), message);
         }
 
         protected virtual bool CanExecuteQueryString

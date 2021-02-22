@@ -8262,6 +8262,311 @@ namespace Microsoft.EntityFrameworkCore.Query
                 assertOrder: true);
         }
 
+        [ConditionalTheory]
+        [MemberData(nameof(IsAsyncData))]
+        public virtual Task Correlated_collection_with_distinct_projecting_identifier_column(bool async)
+        {
+            return AssertQuery(
+                async,
+                ss => ss.Set<Gear>()
+                    .Select(
+                        g => new
+                        {
+                            Key = g.Nickname,
+                            Subquery = g.Weapons
+                                .Select(w => new { w.Id, w.Name })
+                                .Distinct().ToList()
+                        }),
+                elementSorter: e => e.Key,
+                elementAsserter: (e, a) =>
+                {
+                    Assert.Equal(e.Key, a.Key);
+                    AssertCollection(
+                        e.Subquery,
+                        a.Subquery,
+                        elementSorter: ee => ee.Id,
+                        elementAsserter: (ee, aa) =>
+                        {
+                            Assert.Equal(ee.Id, aa.Id);
+                            Assert.Equal(ee.Name, aa.Name);
+                        });
+                });
+        }
+
+        [ConditionalTheory]
+        [MemberData(nameof(IsAsyncData))]
+        public virtual Task Correlated_collection_with_distinct_projecting_identifier_column_and_correlation_key(bool async)
+        {
+            return AssertQuery(
+                async,
+                ss => ss.Set<Gear>()
+                    .Select(
+                        g => new
+                        {
+                            Key = g.Nickname,
+                            Subquery = g.Weapons
+                                .Select(w => new { w.Id, w.Name, w.OwnerFullName })
+                                .Distinct().ToList()
+                        }),
+                elementSorter: e => e.Key,
+                elementAsserter: (e, a) =>
+                {
+                    Assert.Equal(e.Key, a.Key);
+                    AssertCollection(
+                        e.Subquery,
+                        a.Subquery,
+                        elementSorter: ee => ee.Id,
+                        elementAsserter: (ee, aa) =>
+                        {
+                            Assert.Equal(ee.Id, aa.Id);
+                            Assert.Equal(ee.Name, aa.Name);
+                            Assert.Equal(ee.OwnerFullName, aa.OwnerFullName);
+                        });
+                });
+        }
+
+
+        [ConditionalTheory]
+        [MemberData(nameof(IsAsyncData))]
+        public virtual Task Correlated_collection_with_distinct_projecting_identifier_column_composite_key(bool async)
+        {
+            return AssertQuery(
+                async,
+                ss => ss.Set<Squad>()
+                    .Select(
+                        s => new
+                        {
+                            Key = s.Id,
+                            Subquery = s.Members
+                                .Select(m => new { m.Nickname, m.SquadId, m.HasSoulPatch })
+                                .Distinct().ToList()
+                        }),
+                elementSorter: e => e.Key,
+                elementAsserter: (e, a) =>
+                {
+                    Assert.Equal(e.Key, a.Key);
+                    AssertCollection(
+                        e.Subquery,
+                        a.Subquery,
+                        elementSorter: ee => ee.Nickname,
+                        elementAsserter: (ee, aa) =>
+                        {
+                            Assert.Equal(ee.Nickname, aa.Nickname);
+                            Assert.Equal(ee.SquadId, aa.SquadId);
+                            Assert.Equal(ee.HasSoulPatch, aa.HasSoulPatch);
+                        });
+                });
+        }
+
+        [ConditionalTheory]
+        [MemberData(nameof(IsAsyncData))]
+        public virtual Task Correlated_collection_with_distinct_not_projecting_identifier_column(bool async)
+        {
+            return AssertQuery(
+                async,
+                ss => ss.Set<Gear>()
+                    .Select(
+                        g => new
+                        {
+                            Key = g.Nickname,
+                            Subquery = g.Weapons
+                                .Select(w => new { w.Name, w.IsAutomatic })
+                                .Distinct().ToList()
+                        }),
+                elementSorter: e => e.Key,
+                elementAsserter: (e, a) =>
+                {
+                    Assert.Equal(e.Key, a.Key);
+                    AssertCollection(
+                        e.Subquery,
+                        a.Subquery,
+                        elementSorter: ee => ee.Name,
+                        elementAsserter: (ee, aa) =>
+                        {
+                            Assert.Equal(ee.Name, aa.Name);
+                            Assert.Equal(ee.IsAutomatic, aa.IsAutomatic);
+                        });
+                });
+        }
+
+        [ConditionalTheory]
+        [MemberData(nameof(IsAsyncData))]
+        public virtual Task Correlated_collection_with_distinct_not_projecting_identifier_column_also_projecting_complex_expressions(bool async)
+        {
+            return AssertQuery(
+                async,
+                ss => ss.Set<Gear>()
+                    .Select(
+                        g => new
+                        {
+                            Key = g.Nickname,
+                            Subquery = g.Weapons
+                                .Select(w => new { w.Name, w.IsAutomatic, w.OwnerFullName.Length })
+                                .Distinct().ToList()
+                        }),
+                elementSorter: e => e.Key,
+                elementAsserter: (e, a) =>
+                {
+                    Assert.Equal(e.Key, a.Key);
+                    AssertCollection(
+                        e.Subquery,
+                        a.Subquery,
+                        elementSorter: ee => ee.Name,
+                        elementAsserter: (ee, aa) =>
+                        {
+                            Assert.Equal(ee.Name, aa.Name);
+                            Assert.Equal(ee.IsAutomatic, aa.IsAutomatic);
+                            Assert.Equal(ee.Length, aa.Length);
+                        });
+                });
+        }
+
+        [ConditionalTheory]
+        [MemberData(nameof(IsAsyncData))]
+        public virtual Task Correlated_collection_with_groupby_not_projecting_identifier_column_but_only_grouping_key_in_final_projection(bool async)
+        {
+            return AssertQuery(
+                async,
+                ss => ss.Set<Gear>()
+                    .Select(
+                        g => new
+                        {
+                            Key = g.Nickname,
+                            Subquery = g.Weapons
+                                .Select(w => new { w.Name, w.IsAutomatic })
+                                .GroupBy(x => x.IsAutomatic)
+                                .Select(x => new { x.Key }).ToList()
+                        }),
+                elementSorter: e => e.Key,
+                elementAsserter: (e, a) =>
+                {
+                    Assert.Equal(e.Key, a.Key);
+                    AssertCollection(
+                        e.Subquery,
+                        a.Subquery,
+                        elementSorter: ee => ee.Key,
+                        elementAsserter: (ee, aa) =>
+                        {
+                            Assert.Equal(ee.Key, aa.Key);
+                        });
+                });
+        }
+
+        [ConditionalTheory]
+        [MemberData(nameof(IsAsyncData))]
+        public virtual Task Correlated_collection_with_groupby_not_projecting_identifier_column_with_group_aggregate_in_final_projection(bool async)
+        {
+            return AssertQuery(
+                async,
+                ss => ss.Set<Gear>()
+                    .Select(
+                        g => new
+                        {
+                            Key = g.Nickname,
+                            Subquery = g.Weapons
+                                .Select(w => new { w.Name, w.IsAutomatic })
+                                .GroupBy(x => x.IsAutomatic)
+                                .Select(x => new { x.Key, Count = x.Count() }).ToList()
+                        }),
+                elementSorter: e => e.Key,
+                elementAsserter: (e, a) =>
+                {
+                    Assert.Equal(e.Key, a.Key);
+                    AssertCollection(
+                        e.Subquery,
+                        a.Subquery,
+                        elementSorter: ee => ee.Key,
+                        elementAsserter: (ee, aa) =>
+                        {
+                            Assert.Equal(ee.Key, aa.Key);
+                            Assert.Equal(ee.Count, aa.Count);
+                        });
+                });
+        }
+
+        [ConditionalTheory]
+        [MemberData(nameof(IsAsyncData))]
+        public virtual Task Correlated_collection_with_groupby_not_projecting_identifier_column_with_group_aggregate_in_final_projection_multiple_grouping_keys(bool async)
+        {
+            return AssertQuery(
+                async,
+                ss => ss.Set<Gear>()
+                    .Select(
+                        g => new
+                        {
+                            Key = g.Nickname,
+                            Subquery = g.Weapons
+                                .Select(w => new { w.Name, w.IsAutomatic })
+                                .GroupBy(x => new { x.IsAutomatic, x.Name })
+                                .Select(x => new { x.Key, Count = x.Count() }).ToList()
+                        }),
+                elementSorter: e => e.Key,
+                elementAsserter: (e, a) =>
+                {
+                    Assert.Equal(e.Key, a.Key);
+                    AssertCollection(
+                        e.Subquery,
+                        a.Subquery,
+                        elementSorter: ee => ee.Key.Name,
+                        elementAsserter: (ee, aa) =>
+                        {
+                            Assert.Equal(ee.Key.Name, aa.Key.Name);
+                            Assert.Equal(ee.Key.IsAutomatic, aa.Key.IsAutomatic);
+                            Assert.Equal(ee.Count, aa.Count);
+                        });
+                });
+        }
+
+        [ConditionalTheory]
+        [MemberData(nameof(IsAsyncData))]
+        public virtual Task Correlated_collection_with_groupby_with_complex_grouping_key_not_projecting_identifier_column_with_group_aggregate_in_final_projection(bool async)
+        {
+            return AssertQuery(
+                async,
+                ss => ss.Set<Gear>()
+                    .Select(
+                        g => new
+                        {
+                            Key = g.Nickname,
+                            Subquery = g.Weapons
+                                .Select(w => new { w.Name, w.IsAutomatic })
+                                .GroupBy(x => x.Name.Length)
+                                .Select(x => new { x.Key, Count = x.Count() }).ToList()
+                        }),
+                elementSorter: e => e.Key,
+                elementAsserter: (e, a) =>
+                {
+                    Assert.Equal(e.Key, a.Key);
+                    AssertCollection(
+                        e.Subquery,
+                        a.Subquery,
+                        elementSorter: ee => ee.Key,
+                        elementAsserter: (ee, aa) =>
+                        {
+                            Assert.Equal(ee.Key, aa.Key);
+                            Assert.Equal(ee.Count, aa.Count);
+                        });
+                });
+        }
+
+        [ConditionalTheory]
+        [MemberData(nameof(IsAsyncData))]
+        public virtual Task Correlated_collection_via_SelectMany_with_Distinct_missing_indentifying_columns_in_projection(bool async)
+        {
+            return AssertQuery(
+                async,
+                ss => ss.Set<Gear>()
+                    .OrderBy(g => g.Nickname)
+                    .Select(g => g.Weapons.SelectMany(x => x.Owner.AssignedCity.BornGears)
+                    .Select(x => (bool?)x.HasSoulPatch).Distinct().ToList()),
+                ss => ss.Set<Gear>()
+                    .OrderBy(g => g.Nickname)
+                    .Select(g => g.Weapons.SelectMany(x => x.Owner.AssignedCity.Maybe(x => x.BornGears) ?? new List<Gear>())
+                    .Select(x => (bool?)x.HasSoulPatch).Distinct().ToList()),
+                elementAsserter: (e, a) => AssertCollection(e, a, elementSorter: ee => ee),
+                assertOrder: true);
+        }
+
         protected GearsOfWarContext CreateContext()
             => Fixture.CreateContext();
 

@@ -1119,6 +1119,20 @@ namespace Microsoft.EntityFrameworkCore.Query.SqlExpressions
                     // if we can't propagate any identifier - clear them all instead
                     // when adding collection join we detect this and throw appropriate exception
                     _identifier.Clear();
+
+                    if (IsDistinct
+                        && projectionMap.Select(p => p.Value).All(x => x is ColumnExpression))
+                    {
+                        // for distinct try to use entire projection as identifiers
+                        _identifier.AddRange(projectionMap.Select(p => p.Value).Select(x => ((ColumnExpression)x, x.TypeMapping!.Comparer)));
+                    }
+                    else if (GroupBy.Count > 0
+                        && GroupBy.All(x => x is ColumnExpression))
+                    {
+                        // for group by try to use grouping key as identifiers
+                        _identifier.AddRange(GroupBy.Select(x => ((ColumnExpression)x, x.TypeMapping!.Comparer)));
+                    }
+
                     break;
                 }
             }
@@ -1409,7 +1423,7 @@ namespace Microsoft.EntityFrameworkCore.Query.SqlExpressions
                 var parentIdentifier = GetIdentifierAccessor(identifierFromParent).Item1;
                 innerSelectExpression.ApplyProjection();
 
-                ValidateIdentifyingProjection(innerSelectExpression);
+                RemapIdentifiers(innerSelectExpression);
 
                 for (var i = 0; i < identifierFromParent.Count; i++)
                 {
@@ -1511,7 +1525,7 @@ namespace Microsoft.EntityFrameworkCore.Query.SqlExpressions
                 var innerClientEval = innerSelectExpression.Projection.Count > 0;
                 innerSelectExpression.ApplyProjection();
 
-                ValidateIdentifyingProjection(innerSelectExpression);
+                RemapIdentifiers(innerSelectExpression);
 
                 if (collectionIndex == 0)
                 {
@@ -1635,23 +1649,71 @@ namespace Microsoft.EntityFrameworkCore.Query.SqlExpressions
                 return result;
             }
 
-            static void ValidateIdentifyingProjection(SelectExpression selectExpression)
+            static void RemapIdentifiers(SelectExpression innerSelectExpression)
             {
-                if (selectExpression.IsDistinct
-                    || selectExpression.GroupBy.Count > 0)
+                if (innerSelectExpression.IsDistinct
+                    || innerSelectExpression.GroupBy.Count > 0)
                 {
-                    var innerSelectProjectionExpressions = selectExpression._projection.Select(p => p.Expression).ToList();
-                    foreach (var innerSelectIdentifier in selectExpression._identifier)
+                    if (!IdentifiersInProjection(innerSelectExpression, out var missingIdentifier))
                     {
-                        if (!innerSelectProjectionExpressions.Contains(innerSelectIdentifier.Column)
-                            && (selectExpression.GroupBy.Count == 0
-                                || !selectExpression.GroupBy.Contains(innerSelectIdentifier.Column)))
+                        if (innerSelectExpression.IsDistinct)
                         {
-                            throw new InvalidOperationException(RelationalStrings.MissingIdentifyingProjectionInDistinctGroupBySubquery(
-                                innerSelectIdentifier.Column.Table.Alias + "." + innerSelectIdentifier.Column.Name));
+                            if (innerSelectExpression._projection.All(p => p.Expression is ColumnExpression))
+                            {
+                                innerSelectExpression._identifier.Clear();
+                                foreach (var projection in innerSelectExpression._projection)
+                                {
+                                    innerSelectExpression._identifier.Add(((ColumnExpression)projection.Expression, projection.Expression.TypeMapping!.Comparer));
+                                }
+                            }
+                            else
+                            {
+                                throw new InvalidOperationException(
+                                    RelationalStrings.UnableToTranslateSubqueryWithDistinct(
+                                        missingIdentifier.Table.Alias + "." + missingIdentifier.Name));
+                            }
+                        }
+                        else
+                        {
+                            if (innerSelectExpression.GroupBy.All(g => g is ColumnExpression))
+                            {
+                                innerSelectExpression._identifier.Clear();
+                                foreach (var grouping in innerSelectExpression.GroupBy)
+                                {
+                                    innerSelectExpression._identifier.Add(((ColumnExpression)grouping, grouping.TypeMapping!.Comparer));
+                                }
+                            }
+                            else
+                            {
+                                throw new InvalidOperationException(
+                                    RelationalStrings.UnableToTranslateSubqueryWithGroupBy(
+                                        missingIdentifier.Table.Alias + "." + missingIdentifier.Name));
+                            }
                         }
                     }
                 }
+            }
+
+            static bool IdentifiersInProjection(
+                SelectExpression selectExpression,
+                [CA.NotNullWhen(false)] out ColumnExpression? missingIdentifier)
+            {
+                var innerSelectProjectionExpressions = selectExpression._projection.Select(p => p.Expression).ToList();
+                foreach (var innerSelectIdentifier in selectExpression._identifier)
+                {
+                    if (!innerSelectProjectionExpressions.Contains(innerSelectIdentifier.Column)
+                        && (selectExpression.GroupBy.Count == 0
+                            || !selectExpression.GroupBy.Contains(innerSelectIdentifier.Column)))
+                    {
+                        missingIdentifier = innerSelectIdentifier.Column;
+
+                        return false;
+                    }
+                }
+
+                missingIdentifier = null;
+
+                return true;
             }
         }
 
@@ -1709,12 +1771,54 @@ namespace Microsoft.EntityFrameworkCore.Query.SqlExpressions
                     joinPredicate = RemoveRedundantNullChecks(joinPredicate, columnExpressions);
                 }
 
+                // we can't convert apply to join in case of distinct and groupby, if the projection doesn't already contain the join keys
+                // since we can't add the missing keys to the projection - only convert to join if all the keys are already there
+                if (joinPredicate != null
+                    && (selectExpression.IsDistinct
+                    || selectExpression.GroupBy.Count > 0))
+                {
+                    // if select expression has only one table and projecting an entity
+                    // we are guaranteed that the join key will be in the projection
+                    // even if currently the projection is not populated
+                    if (selectExpression.Tables.Count != 1
+                        || selectExpression._projectionMapping.Count != 1
+                        || selectExpression._projectionMapping.First().Value is not EntityProjectionExpression)
+                    {
+                        var innerKeyColumns = InnerKeyColumns(selectExpression.Tables, joinPredicate);
+                        foreach (var innerColumn in innerKeyColumns)
+                        {
+                            if (!selectExpression.Projection.Select(p => p.Expression).Contains(innerColumn))
+                            {
+                                return null;
+                            }
+                        }
+                    }
+                }
+
                 selectExpression.Predicate = predicate;
 
                 return joinPredicate;
             }
 
             return null;
+
+            static List<ColumnExpression> InnerKeyColumns(IEnumerable<TableExpressionBase> tables, SqlExpression joinPredicate)
+            {
+                if (joinPredicate is SqlBinaryExpression sqlBinaryExpression)
+                {
+                    var leftColumns = InnerKeyColumns(tables, sqlBinaryExpression.Left);
+                    var rightColumns = InnerKeyColumns(tables, sqlBinaryExpression.Right);
+
+                    return leftColumns.Concat(rightColumns).ToList();
+                }
+                else if (joinPredicate is ColumnExpression columnExpression
+                    && tables.Contains(columnExpression.Table))
+                {
+                    return new List<ColumnExpression> { columnExpression };
+                }
+
+                return new List<ColumnExpression>();
+            }
         }
 
         private SqlExpression? TryExtractJoinKey(

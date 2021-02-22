@@ -1426,14 +1426,6 @@ WHERE [c].[CustomerID] = N'ALFKI'
 ORDER BY [c].[CustomerID], [o].[OrderID], [o0].[OrderID]");
         }
 
-        public override async Task Projecting_after_navigation_and_distinct_throws(bool async)
-        {
-            var message = (await Assert.ThrowsAsync<InvalidOperationException>(
-                () => base.Projecting_after_navigation_and_distinct_throws(async))).Message;
-
-            Assert.Equal(RelationalStrings.InsufficientInformationToIdentifyOuterElementOfCollectionJoin, message);
-        }
-
         public override async Task Custom_projection_reference_navigation_PK_to_FK_optimization(bool async)
         {
             await base.Custom_projection_reference_navigation_PK_to_FK_optimization(async);
@@ -1585,6 +1577,98 @@ END
 FROM [Orders] AS [o]
 WHERE [o].[OrderID] < 10300
 ORDER BY [o].[OrderID]");
+        }
+
+        public override async Task Projecting_after_navigation_and_distinct(bool async)
+        {
+            await base.Projecting_after_navigation_and_distinct(async);
+
+            AssertSql(
+                @"SELECT [t].[CustomerID], [t].[Address], [t].[City], [t].[CompanyName], [t].[ContactName], [t].[ContactTitle], [t].[Country], [t].[Fax], [t].[Phone], [t].[PostalCode], [t].[Region], [t0].[CustomerID], [t0].[OrderID], [t0].[OrderDate]
+FROM (
+    SELECT DISTINCT [c].[CustomerID], [c].[Address], [c].[City], [c].[CompanyName], [c].[ContactName], [c].[ContactTitle], [c].[Country], [c].[Fax], [c].[Phone], [c].[PostalCode], [c].[Region]
+    FROM [Orders] AS [o]
+    LEFT JOIN [Customers] AS [c] ON [o].[CustomerID] = [c].[CustomerID]
+) AS [t]
+OUTER APPLY (
+    SELECT [t].[CustomerID], [o0].[OrderID], [o0].[OrderDate]
+    FROM [Orders] AS [o0]
+    WHERE [o0].[OrderID] IN (10248, 10249, 10250) AND (([t].[CustomerID] = [o0].[CustomerID]) OR ([t].[CustomerID] IS NULL AND [o0].[CustomerID] IS NULL))
+) AS [t0]
+ORDER BY [t].[CustomerID], [t].[Address], [t].[City], [t].[CompanyName], [t].[ContactName], [t].[ContactTitle], [t].[Country], [t].[Fax], [t].[Phone], [t].[PostalCode], [t].[Region], [t0].[OrderID]");
+        }
+
+        public override async Task Correlated_collection_after_distinct_with_complex_projection_containing_original_identifier(bool async)
+        {
+            await base.Correlated_collection_after_distinct_with_complex_projection_containing_original_identifier(async);
+
+            AssertSql(
+                @"SELECT [t].[OrderID], [t].[Complex], [t0].[Outer], [t0].[Inner], [t0].[OrderDate]
+FROM (
+    SELECT DISTINCT [o].[OrderID], DATEPART(month, [o].[OrderDate]) AS [Complex]
+    FROM [Orders] AS [o]
+) AS [t]
+OUTER APPLY (
+    SELECT [t].[OrderID] AS [Outer], [o0].[OrderID] AS [Inner], [o0].[OrderDate]
+    FROM [Orders] AS [o0]
+    WHERE [o0].[OrderID] IN (10248, 10249, 10250) AND ([t].[OrderID] = [o0].[OrderID])
+) AS [t0]
+ORDER BY [t].[OrderID], [t0].[Inner]");
+        }
+
+        public override async Task Correlated_collection_after_distinct_not_containing_original_identifier(bool async)
+        {
+            await base.Correlated_collection_after_distinct_not_containing_original_identifier(async);
+
+            AssertSql(
+                @"SELECT [t].[OrderDate], [t].[CustomerID], [t0].[Outer1], [t0].[Outer2], [t0].[Inner], [t0].[OrderDate]
+FROM (
+    SELECT DISTINCT [o].[OrderDate], [o].[CustomerID]
+    FROM [Orders] AS [o]
+) AS [t]
+OUTER APPLY (
+    SELECT [t].[OrderDate] AS [Outer1], [t].[CustomerID] AS [Outer2], [o0].[OrderID] AS [Inner], [o0].[OrderDate]
+    FROM [Orders] AS [o0]
+    WHERE [o0].[OrderID] IN (10248, 10249, 10250) AND (([t].[CustomerID] = [o0].[CustomerID]) OR ([t].[CustomerID] IS NULL AND [o0].[CustomerID] IS NULL))
+) AS [t0]
+ORDER BY [t].[OrderDate], [t].[CustomerID], [t0].[Inner]");
+        }
+
+        public override async Task Correlated_collection_after_distinct_with_complex_projection_not_containing_original_identifier(bool async)
+        {
+            await base.Correlated_collection_after_distinct_with_complex_projection_not_containing_original_identifier(async);
+
+            AssertSql(
+                @"SELECT [t].[OrderDate], [t].[CustomerID], [t].[Complex], [t0].[Outer1], [t0].[Outer2], [t0].[Outer3], [t0].[Inner], [t0].[OrderDate]
+FROM (
+    SELECT DISTINCT [o].[OrderDate], [o].[CustomerID], DATEPART(month, [o].[OrderDate]) AS [Complex]
+    FROM [Orders] AS [o]
+) AS [t]
+OUTER APPLY (
+    SELECT [t].[OrderDate] AS [Outer1], [t].[CustomerID] AS [Outer2], [t].[Complex] AS [Outer3], [o0].[OrderID] AS [Inner], [o0].[OrderDate]
+    FROM [Orders] AS [o0]
+    WHERE [o0].[OrderID] IN (10248, 10249, 10250) AND (([t].[CustomerID] = [o0].[CustomerID]) OR ([t].[CustomerID] IS NULL AND [o0].[CustomerID] IS NULL))
+) AS [t0]
+ORDER BY [t].[OrderDate], [t].[CustomerID], [t].[Complex], [t0].[Inner]");
+        }
+
+        public override async Task Correlated_collection_after_groupby_with_complex_projection_containing_original_identifier(bool async)
+        {
+            await base.Correlated_collection_after_groupby_with_complex_projection_containing_original_identifier(async);
+
+            AssertSql(
+                @"SELECT [t].[OrderID], [t].[c], [t0].[Outer], [t0].[Inner], [t0].[OrderDate]
+FROM (
+    SELECT [o].[OrderID], DATEPART(month, [o].[OrderDate]) AS [c]
+    FROM [Orders] AS [o]
+    GROUP BY [o].[OrderID], DATEPART(month, [o].[OrderDate])
+) AS [t]
+OUTER APPLY (
+    SELECT [t].[OrderID] AS [Outer], [o0].[OrderID] AS [Inner], [o0].[OrderDate]
+    FROM [Orders] AS [o0]
+    WHERE [o0].[OrderID] IN (10248, 10249, 10250) AND ([t].[OrderID] = [o0].[OrderID])
+) AS [t0]
+ORDER BY [t].[OrderID], [t0].[Inner]");
         }
 
         private void AssertSql(params string[] expected)

@@ -387,9 +387,31 @@ namespace Microsoft.EntityFrameworkCore.Query
         {
             Check.NotNull(source, nameof(source));
 
+            var collectionShaperExpressionFinder = new CollectionShaperExpressionFinder();
+            collectionShaperExpressionFinder.Visit(source.ShaperExpression);
+            if (collectionShaperExpressionFinder.Found)
+            {
+                throw new NotSupportedException(RelationalStrings.DistinctOnCollectionNotSupported);
+            }
+
             ((SelectExpression)source.QueryExpression).ApplyDistinct();
 
             return source;
+        }
+
+        private sealed class CollectionShaperExpressionFinder : ExpressionVisitor
+        {
+            public bool Found { get; private set; }
+
+            protected override Expression VisitExtension(Expression extensionExpression)
+            {
+                if (extensionExpression is CollectionShaperExpression)
+                {
+                    Found = true;
+                }
+
+                return base.VisitExtension(extensionExpression);
+            }
         }
 
         /// <inheritdoc />

@@ -3037,5 +3037,32 @@ namespace Microsoft.EntityFrameworkCore.Query
         }
 
         #endregion
+
+        #region GroupByAndDistinctWithCorrelatedCollection
+
+        [ConditionalTheory]
+        [MemberData(nameof(IsAsyncData))]
+        public virtual Task Select_uncorrelated_collection_with_groupby_when_outer_is_distinct(bool async)
+        {
+            return AssertQuery(
+                async,
+                ss => ss.Set<Order>()
+                    .Where(c => c.CustomerID.StartsWith("A"))
+                    .Select(c => c.Customer.City)
+                    .Distinct()
+                    .Select(c => new
+                    {
+                        c1 = ss.Set<Product>().GroupBy(p => p.ProductID).Select(g => g.Key).ToArray(),
+                        c2 = ss.Set<Product>().GroupBy(p => p.ProductID).Select(g => g.Count()).ToArray()
+                    }),
+                assertOrder: true,
+                elementAsserter: (e, a) =>
+                {
+                    AssertCollection(e.c1, a.c1);
+                    AssertCollection(e.c2, a.c2);
+                });
+        }
+
+        #endregion
     }
 }

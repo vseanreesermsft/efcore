@@ -1143,12 +1143,34 @@ ORDER BY c[""CustomerID""]");
             return base.Projecting_multiple_collection_with_same_constant_works(async);
         }
 
-        [ConditionalTheory(Skip = "Issue#17246")]
-        public override async Task Projecting_after_navigation_and_distinct_throws(bool isAsync)
+        [ConditionalTheory(Skip = "Cross collection join Issue#17246")]
+        public override Task Projecting_after_navigation_and_distinct(bool async)
         {
-            await base.Projecting_after_navigation_and_distinct_throws(isAsync);
+            return base.Projecting_after_navigation_and_distinct(async);
+        }
 
-            AssertSql(" ");
+        [ConditionalTheory(Skip = "Cross collection join Issue#17246")]
+        public override Task Correlated_collection_after_distinct_with_complex_projection_containing_original_identifier(bool async)
+        {
+            return base.Correlated_collection_after_distinct_with_complex_projection_containing_original_identifier(async);
+        }
+
+        [ConditionalTheory(Skip = "Cross collection join Issue#17246")]
+        public override Task Correlated_collection_after_distinct_not_containing_original_identifier(bool async)
+        {
+            return base.Correlated_collection_after_distinct_not_containing_original_identifier(async);
+        }
+
+        [ConditionalTheory(Skip = "Cross collection join Issue#17246")]
+        public override Task Correlated_collection_after_distinct_with_complex_projection_not_containing_original_identifier(bool async)
+        {
+            return base.Correlated_collection_after_distinct_with_complex_projection_not_containing_original_identifier(async);
+        }
+
+        [ConditionalTheory(Skip = "Cross collection join Issue#17246")]
+        public override Task Correlated_collection_after_groupby_with_complex_projection_containing_original_identifier(bool async)
+        {
+            return base.Correlated_collection_after_groupby_with_complex_projection_containing_original_identifier(async);
         }
 
         public override Task Reverse_without_explicit_ordering(bool async)

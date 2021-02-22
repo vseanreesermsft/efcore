@@ -1795,7 +1795,7 @@ namespace Microsoft.EntityFrameworkCore.Query
 
         [ConditionalTheory]
         [MemberData(nameof(IsAsyncData))]
-        public virtual Task Projecting_after_navigation_and_distinct_throws(bool async)
+        public virtual Task Projecting_after_navigation_and_distinct(bool async)
         {
             var filteredOrderIds = new[] { 10248, 10249, 10250 };
 
@@ -1822,6 +1822,120 @@ namespace Microsoft.EntityFrameworkCore.Query
                 {
                     Assert.Equal(e.CustomerID, a.CustomerID);
                     AssertCollection(e.Orders, a.Orders, elementSorter: ee => ee.CustomerID);
+                });
+        }
+
+        [ConditionalTheory]
+        [MemberData(nameof(IsAsyncData))]
+        public virtual Task Correlated_collection_after_distinct_with_complex_projection_containing_original_identifier(bool async)
+        {
+            var filteredOrderIds = new[] { 10248, 10249, 10250 };
+
+            return AssertQuery(
+                async,
+                ss => ss.Set<Order>()
+                    .Select(o => new { o.OrderID, Complex = o.OrderDate.Value.Month })
+                    .Distinct()
+                    .Select(c => new
+                    {
+                        c.OrderID,
+                        c.Complex,
+                        Subquery = (from x in ss.Set<Order>()
+                                    where x.OrderID == c.OrderID && filteredOrderIds.Contains(x.OrderID)
+                                    select new { Outer = c.OrderID, Inner = x.OrderID, x.OrderDate }).ToList()
+                    }),
+                elementSorter: e => e.OrderID,
+                elementAsserter: (e, a) =>
+                {
+                    Assert.Equal(e.OrderID, a.OrderID);
+                    Assert.Equal(e.Complex, a.Complex);
+                    AssertCollection(e.Subquery, a.Subquery, elementSorter: ee => ee.Outer);
+                });
+        }
+
+        [ConditionalTheory]
+        [MemberData(nameof(IsAsyncData))]
+        public virtual Task Correlated_collection_after_distinct_not_containing_original_identifier(bool async)
+        {
+            var filteredOrderIds = new[] { 10248, 10249, 10250 };
+
+            return AssertQuery(
+                async,
+                ss => ss.Set<Order>()
+                    .Select(o => new { o.OrderDate, o.CustomerID })
+                    .Distinct()
+                    .Select(c => new
+                    {
+                        c.OrderDate,
+                        c.CustomerID,
+                        Subquery = (from x in ss.Set<Order>()
+                                    where x.CustomerID == c.CustomerID && filteredOrderIds.Contains(x.OrderID)
+                                    select new { Outer1 = c.OrderDate, Outer2 = c.CustomerID, Inner = x.OrderID, x.OrderDate }).ToList()
+                    }),
+                elementSorter: e => (e.OrderDate, e.CustomerID),
+                elementAsserter: (e, a) =>
+                {
+                    Assert.Equal(e.OrderDate, a.OrderDate);
+                    Assert.Equal(e.CustomerID, a.CustomerID);
+                    AssertCollection(e.Subquery, a.Subquery, elementSorter: ee => (ee.Outer1, ee.Outer2, ee.Inner, ee.OrderDate));
+                });
+        }
+
+        [ConditionalTheory]
+        [MemberData(nameof(IsAsyncData))]
+        public virtual Task Correlated_collection_after_distinct_with_complex_projection_not_containing_original_identifier(bool async)
+        {
+            var filteredOrderIds = new[] { 10248, 10249, 10250 };
+
+            return AssertQuery(
+                async,
+                ss => ss.Set<Order>()
+                    .Select(o => new { o.OrderDate, o.CustomerID, Complex = o.OrderDate.Value.Month })
+                    .Distinct()
+                    .Select(c => new
+                    {
+                        c.OrderDate,
+                        c.CustomerID,
+                        c.Complex,
+                        Subquery = (from x in ss.Set<Order>()
+                                    where x.CustomerID == c.CustomerID && filteredOrderIds.Contains(x.OrderID)
+                                    select new { Outer1 = c.OrderDate, Outer2 = c.CustomerID, Outer3 = c.Complex, Inner = x.OrderID, x.OrderDate }).ToList()
+                    }),
+                elementSorter: e => (e.OrderDate, e.CustomerID, e.Complex),
+                elementAsserter: (e, a) =>
+                {
+                    Assert.Equal(e.OrderDate, a.OrderDate);
+                    Assert.Equal(e.CustomerID, a.CustomerID);
+                    Assert.Equal(e.Complex, a.Complex);
+                    AssertCollection(e.Subquery, a.Subquery, elementSorter: ee => (ee.Outer1, ee.Outer2, ee.Outer3, ee.Inner, ee.OrderDate));
+                });
+        }
+
+        [ConditionalTheory]
+        [MemberData(nameof(IsAsyncData))]
+        public virtual Task Correlated_collection_after_groupby_with_complex_projection_containing_original_identifier(bool async)
+        {
+            var filteredOrderIds = new[] { 10248, 10249, 10250 };
+
+            return AssertQuery(
+                async,
+                ss => ss.Set<Order>()
+                    .GroupBy(o => new { o.OrderID, Complex = o.OrderDate.Value.Month })
+                    .Select(g => new { g.Key, Aggregate = g.Count() })
+                    .Select(c => new
+                    {
+                        c.Key.OrderID,
+                        c.Key.Complex,
+                        Subquery = (from x in ss.Set<Order>()
+                                    where x.OrderID == c.Key.OrderID && filteredOrderIds.Contains(x.OrderID)
+                                    select new { Outer = c.Key.OrderID, Inner = x.OrderID, x.OrderDate }).ToList()
+                    }),
+                elementSorter: e => e.OrderID,
+                elementAsserter: (e, a) =>
+                {
+                    Assert.Equal(e.OrderID, a.OrderID);
+                    Assert.Equal(e.Complex, a.Complex);
+                    AssertCollection(e.Subquery, a.Subquery, elementSorter: ee => ee.Outer);
                 });
         }
 
