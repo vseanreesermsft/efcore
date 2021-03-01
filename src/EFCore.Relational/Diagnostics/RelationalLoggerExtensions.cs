@@ -54,6 +54,7 @@ namespace Microsoft.EntityFrameworkCore.Diagnostics
         /// <param name="commandId"> The correlation ID associated with the given <see cref="DbCommand" />. </param>
         /// <param name="connectionId"> The correlation ID associated with the <see cref="DbConnection" /> being used. </param>
         /// <param name="startTime"> The time that execution began. </param>
+        /// <param name="loggingOccurred"> Whether logging took place via any of the supported logging mechanisms. </param>
         /// <returns> An intercepted result. </returns>
         public static InterceptionResult<DbCommand> CommandCreating(
             [NotNull] this IDiagnosticsLogger<DbLoggerCategory.Database.Command> diagnostics,
@@ -62,15 +63,25 @@ namespace Microsoft.EntityFrameworkCore.Diagnostics
             [CanBeNull] DbContext? context,
             Guid commandId,
             Guid connectionId,
-            DateTimeOffset startTime)
+            DateTimeOffset startTime,
+            out bool loggingOccurred)
         {
+            loggingOccurred = false;
+
             var definition = RelationalResources.LogCommandCreating(diagnostics);
 
-            LogCommandCreating(diagnostics, definition, commandMethod);
+            if (diagnostics.ShouldLog(definition))
+            {
+                loggingOccurred = true;
+
+                definition.Log(diagnostics, commandMethod.ToString());
+            }
 
             if (diagnostics.NeedsEventData<IDbCommandInterceptor>(
                 definition, out var interceptor, out var diagnosticSourceEnabled, out var simpleLogEnabled))
             {
+                loggingOccurred = true;
+
                 var eventData = BroadcastCommandCreating(
                     diagnostics,
                     connection.DbConnection,
@@ -152,6 +163,7 @@ namespace Microsoft.EntityFrameworkCore.Diagnostics
         /// <param name="connectionId"> The correlation ID associated with the <see cref="DbConnection" /> being used. </param>
         /// <param name="startTime"> The time that execution began. </param>
         /// <param name="duration"> The duration of the command creation. </param>
+        /// <param name="loggingOccurred"> Whether logging took place via any of the supported logging mechanisms. </param>
         /// <returns> An intercepted result. </returns>
         public static DbCommand CommandCreated(
             [NotNull] this IDiagnosticsLogger<DbLoggerCategory.Database.Command> diagnostics,
@@ -162,15 +174,25 @@ namespace Microsoft.EntityFrameworkCore.Diagnostics
             Guid commandId,
             Guid connectionId,
             DateTimeOffset startTime,
-            TimeSpan duration)
+            TimeSpan duration,
+            out bool loggingOccurred)
         {
+            loggingOccurred = false;
+
             var definition = RelationalResources.LogCommandCreated(diagnostics);
 
-            LogCommandCreated(diagnostics, definition, commandMethod, duration);
+            if (diagnostics.ShouldLog(definition))
+            {
+                loggingOccurred = true;
+
+                definition.Log(diagnostics, commandMethod.ToString(), (int)duration.TotalMilliseconds);
+            }
 
             if (diagnostics.NeedsEventData<IDbCommandInterceptor>(
                 definition, out var interceptor, out var diagnosticSourceEnabled, out var simpleLogEnabled))
             {
+                loggingOccurred = true;
+
                 var eventData = BroadcastCommandCreated(
                     diagnostics,
                     connection.DbConnection,
@@ -408,6 +430,7 @@ namespace Microsoft.EntityFrameworkCore.Diagnostics
         /// <param name="commandId"> The correlation ID associated with the given <see cref="DbCommand" />. </param>
         /// <param name="connectionId"> The correlation ID associated with the <see cref="DbConnection" /> being used. </param>
         /// <param name="startTime"> The time that execution began. </param>
+        /// <param name="loggingOccurred"> Whether logging took place via any of the supported logging mechanisms. </param>
         /// <param name="cancellationToken"> A <see cref="CancellationToken" /> to observe while waiting for the task to complete. </param>
         /// <returns> An intercepted result. </returns>
         /// <exception cref="OperationCanceledException"> If the <see cref="CancellationToken"/> is canceled. </exception>
@@ -419,15 +442,31 @@ namespace Microsoft.EntityFrameworkCore.Diagnostics
             Guid commandId,
             Guid connectionId,
             DateTimeOffset startTime,
+            out bool loggingOccurred,
             CancellationToken cancellationToken = default)
         {
+            loggingOccurred = false;
+
             var definition = RelationalResources.LogExecutingCommand(diagnostics);
 
-            LogCommandExecuting(diagnostics, command, definition);
+            if (diagnostics.ShouldLog(definition))
+            {
+                loggingOccurred = true;
+
+                definition.Log(
+                    diagnostics,
+                    command.Parameters.FormatParameters(ShouldLogParameterValues(diagnostics, command)),
+                    command.CommandType,
+                    command.CommandTimeout,
+                    Environment.NewLine,
+                    command.CommandText.TrimEnd());
+            }
 
             if (diagnostics.NeedsEventData<IDbCommandInterceptor>(
                 definition, out var interceptor, out var diagnosticSourceEnabled, out var simpleLogEnabled))
             {
+                loggingOccurred = true;
+
                 var eventData = BroadcastCommandExecuting(
                     diagnostics,
                     connection.DbConnection,
@@ -804,6 +843,7 @@ namespace Microsoft.EntityFrameworkCore.Diagnostics
         /// <param name="methodResult"> The return value from the underlying method execution. </param>
         /// <param name="startTime"> The time that execution began. </param>
         /// <param name="duration"> The duration of the command execution, not including consuming results. </param>
+        /// <param name="loggingOccurred"> Whether logging took place via any of the supported logging mechanisms. </param>
         /// <param name="cancellationToken"> A <see cref="CancellationToken" /> to observe while waiting for the task to complete. </param>
         /// <returns> The result of execution, which may have been modified by an interceptor. </returns>
         /// <exception cref="OperationCanceledException"> If the <see cref="CancellationToken"/> is canceled. </exception>
@@ -817,15 +857,32 @@ namespace Microsoft.EntityFrameworkCore.Diagnostics
             [NotNull] DbDataReader methodResult,
             DateTimeOffset startTime,
             TimeSpan duration,
+            out bool loggingOccurred,
             CancellationToken cancellationToken = default)
         {
+            loggingOccurred = false;
+
             var definition = RelationalResources.LogExecutedCommand(diagnostics);
 
-            LogCommandExecuted(diagnostics, command, duration, definition);
+            if (diagnostics.ShouldLog(definition))
+            {
+                loggingOccurred = true;
+
+                definition.Log(
+                    diagnostics,
+                    string.Format(CultureInfo.InvariantCulture, "{0:N0}", duration.TotalMilliseconds),
+                    command.Parameters.FormatParameters(ShouldLogParameterValues(diagnostics, command)),
+                    command.CommandType,
+                    command.CommandTimeout,
+                    Environment.NewLine,
+                    command.CommandText.TrimEnd());
+            }
 
             if (diagnostics.NeedsEventData<IDbCommandInterceptor>(
                 definition, out var interceptor, out var diagnosticSourceEnabled, out var simpleLogEnabled))
             {
+                loggingOccurred = true;
+
                 var eventData = BroadcastCommandExecuted(
                     diagnostics,
                     connection.DbConnection,
@@ -1232,7 +1289,12 @@ namespace Microsoft.EntityFrameworkCore.Diagnostics
         {
             var definition = RelationalResources.LogOpeningConnection(diagnostics);
 
-            LogConnectionOpening(diagnostics, connection, definition);
+            if (diagnostics.ShouldLog(definition))
+            {
+                definition.Log(
+                    diagnostics,
+                    connection.DbConnection.Database, connection.DbConnection.DataSource);
+            }
 
             if (diagnostics.NeedsEventData<IDbConnectionInterceptor>(
                 definition, out var interceptor, out var diagnosticSourceEnabled, out var simpleLogEnabled))
@@ -1262,21 +1324,32 @@ namespace Microsoft.EntityFrameworkCore.Diagnostics
         /// <param name="connection"> The connection. </param>
         /// <param name="startTime"> The time that the operation was started. </param>
         /// <param name="cancellationToken"> A <see cref="CancellationToken" /> to observe while waiting for the task to complete. </param>
+        /// <param name="loggingOccurred"> Whether logging took place via any of the supported logging mechanisms. </param>
         /// <returns> A <see cref="Task" /> representing the async operation. </returns>
         /// <exception cref="OperationCanceledException"> If the <see cref="CancellationToken"/> is canceled. </exception>
         public static ValueTask<InterceptionResult> ConnectionOpeningAsync(
             [NotNull] this IDiagnosticsLogger<DbLoggerCategory.Database.Connection> diagnostics,
             [NotNull] IRelationalConnection connection,
             DateTimeOffset startTime,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            out bool loggingOccurred)
         {
+            loggingOccurred = false;
+
             var definition = RelationalResources.LogOpeningConnection(diagnostics);
 
-            LogConnectionOpening(diagnostics, connection, definition);
+            if (diagnostics.ShouldLog(definition))
+            {
+                loggingOccurred = true;
+                definition.Log(
+                    diagnostics,
+                    connection.DbConnection.Database, connection.DbConnection.DataSource);
+            }
 
             if (diagnostics.NeedsEventData<IDbConnectionInterceptor>(
                 definition, out var interceptor, out var diagnosticSourceEnabled, out var simpleLogEnabled))
             {
+                loggingOccurred = true;
                 var eventData = BroadcastConnectionOpening(
                     diagnostics,
                     connection,
@@ -1293,19 +1366,6 @@ namespace Microsoft.EntityFrameworkCore.Diagnostics
             }
 
             return default;
-        }
-
-        private static void LogConnectionOpening(
-            IDiagnosticsLogger<DbLoggerCategory.Database.Connection> diagnostics,
-            IRelationalConnection connection,
-            EventDefinition<string, string> definition)
-        {
-            if (diagnostics.ShouldLog(definition))
-            {
-                definition.Log(
-                    diagnostics,
-                    connection.DbConnection.Database, connection.DbConnection.DataSource);
-            }
         }
 
         private static ConnectionEventData BroadcastConnectionOpening(
@@ -1355,7 +1415,12 @@ namespace Microsoft.EntityFrameworkCore.Diagnostics
         {
             var definition = RelationalResources.LogOpenedConnection(diagnostics);
 
-            LogConnectionOpened(diagnostics, connection, definition);
+            if (diagnostics.ShouldLog(definition))
+            {
+                definition.Log(
+                    diagnostics,
+                    connection.DbConnection.Database, connection.DbConnection.DataSource);
+            }
 
             if (diagnostics.NeedsEventData<IDbConnectionInterceptor>(
                 definition, out var interceptor, out var diagnosticSourceEnabled, out var simpleLogEnabled))
@@ -1382,6 +1447,7 @@ namespace Microsoft.EntityFrameworkCore.Diagnostics
         /// <param name="startTime"> The time that the operation was started. </param>
         /// <param name="duration"> The amount of time before the connection was opened. </param>
         /// <param name="cancellationToken"> A <see cref="CancellationToken" /> to observe while waiting for the task to complete. </param>
+        /// <param name="loggingOccurred"> Whether logging took place via any of the supported logging mechanisms. </param>
         /// <returns> A <see cref="Task" /> representing the async operation. </returns>
         /// <exception cref="OperationCanceledException"> If the <see cref="CancellationToken"/> is canceled. </exception>
         public static Task ConnectionOpenedAsync(
@@ -1389,15 +1455,27 @@ namespace Microsoft.EntityFrameworkCore.Diagnostics
             [NotNull] IRelationalConnection connection,
             DateTimeOffset startTime,
             TimeSpan duration,
+            out bool loggingOccurred,
             CancellationToken cancellationToken = default)
         {
+            loggingOccurred = false;
+
             var definition = RelationalResources.LogOpenedConnection(diagnostics);
 
-            LogConnectionOpened(diagnostics, connection, definition);
+            if (diagnostics.ShouldLog(definition))
+            {
+                loggingOccurred = true;
+
+                definition.Log(
+                    diagnostics,
+                    connection.DbConnection.Database, connection.DbConnection.DataSource);
+            }
 
             if (diagnostics.NeedsEventData<IDbConnectionInterceptor>(
                 definition, out var interceptor, out var diagnosticSourceEnabled, out var simpleLogEnabled))
             {
+                loggingOccurred = true;
+
                 var eventData = BroadcastConnectionOpened(
                     diagnostics,
                     connection,
@@ -1442,19 +1520,6 @@ namespace Microsoft.EntityFrameworkCore.Diagnostics
             return eventData;
         }
 
-        private static void LogConnectionOpened(
-            IDiagnosticsLogger<DbLoggerCategory.Database.Connection> diagnostics,
-            IRelationalConnection connection,
-            EventDefinition<string, string> definition)
-        {
-            if (diagnostics.ShouldLog(definition))
-            {
-                definition.Log(
-                    diagnostics,
-                    connection.DbConnection.Database, connection.DbConnection.DataSource);
-            }
-        }
-
         private static string ConnectionOpened(EventDefinitionBase definition, EventData payload)
         {
             var d = (EventDefinition<string, string>)definition;
@@ -1478,7 +1543,12 @@ namespace Microsoft.EntityFrameworkCore.Diagnostics
         {
             var definition = RelationalResources.LogClosingConnection(diagnostics);
 
-            LogConnectionClosing(diagnostics, connection, definition);
+            if (diagnostics.ShouldLog(definition))
+            {
+                definition.Log(
+                    diagnostics,
+                    connection.DbConnection.Database, connection.DbConnection.DataSource);
+            }
 
             if (diagnostics.NeedsEventData<IDbConnectionInterceptor>(
                 definition, out var interceptor, out var diagnosticSourceEnabled, out var simpleLogEnabled))
@@ -1507,19 +1577,32 @@ namespace Microsoft.EntityFrameworkCore.Diagnostics
         /// <param name="diagnostics"> The diagnostics logger to use. </param>
         /// <param name="connection"> The connection. </param>
         /// <param name="startTime"> The time that the operation was started. </param>
+        /// <param name="loggingOccurred"> Whether logging took place via any of the supported logging mechanisms. </param>
         /// <returns> A <see cref="Task" /> representing the async operation. </returns>
         public static ValueTask<InterceptionResult> ConnectionClosingAsync(
             [NotNull] this IDiagnosticsLogger<DbLoggerCategory.Database.Connection> diagnostics,
             [NotNull] IRelationalConnection connection,
-            DateTimeOffset startTime)
+            DateTimeOffset startTime,
+            out bool loggingOccurred)
         {
+            loggingOccurred = false;
+
             var definition = RelationalResources.LogClosingConnection(diagnostics);
 
-            LogConnectionClosing(diagnostics, connection, definition);
+            if (diagnostics.ShouldLog(definition))
+            {
+                loggingOccurred = true;
+
+                definition.Log(
+                    diagnostics,
+                    connection.DbConnection.Database, connection.DbConnection.DataSource);
+            }
 
             if (diagnostics.NeedsEventData<IDbConnectionInterceptor>(
                 definition, out var interceptor, out var diagnosticSourceEnabled, out var simpleLogEnabled))
             {
+                loggingOccurred = true;
+
                 var eventData = BroadcastConnectionClosing(
                     diagnostics,
                     connection,
@@ -1561,19 +1644,6 @@ namespace Microsoft.EntityFrameworkCore.Diagnostics
             return eventData;
         }
 
-        private static void LogConnectionClosing(
-            IDiagnosticsLogger<DbLoggerCategory.Database.Connection> diagnostics,
-            IRelationalConnection connection,
-            EventDefinition<string, string> definition)
-        {
-            if (diagnostics.ShouldLog(definition))
-            {
-                definition.Log(
-                    diagnostics,
-                    connection.DbConnection.Database, connection.DbConnection.DataSource);
-            }
-        }
-
         private static string ConnectionClosing(EventDefinitionBase definition, EventData payload)
         {
             var d = (EventDefinition<string, string>)definition;
@@ -1598,7 +1668,12 @@ namespace Microsoft.EntityFrameworkCore.Diagnostics
         {
             var definition = RelationalResources.LogClosedConnection(diagnostics);
 
-            LogConnectionClosed(diagnostics, connection, definition);
+            if (diagnostics.ShouldLog(definition))
+            {
+                definition.Log(
+                    diagnostics,
+                    connection.DbConnection.Database, connection.DbConnection.DataSource);
+            }
 
             if (diagnostics.NeedsEventData<IDbConnectionInterceptor>(
                 definition, out var interceptor, out var diagnosticSourceEnabled, out var simpleLogEnabled))
@@ -1624,20 +1699,33 @@ namespace Microsoft.EntityFrameworkCore.Diagnostics
         /// <param name="connection"> The connection. </param>
         /// <param name="startTime"> The time that the operation was started. </param>
         /// <param name="duration"> The amount of time before the connection was closed. </param>
+        /// <param name="loggingOccurred"> Whether logging took place via any of the supported logging mechanisms. </param>
         /// <returns> A <see cref="Task" /> representing the async operation. </returns>
         public static Task ConnectionClosedAsync(
             [NotNull] this IDiagnosticsLogger<DbLoggerCategory.Database.Connection> diagnostics,
             [NotNull] IRelationalConnection connection,
             DateTimeOffset startTime,
-            TimeSpan duration)
+            TimeSpan duration,
+            out bool loggingOccurred)
         {
+            loggingOccurred = false;
+
             var definition = RelationalResources.LogClosedConnection(diagnostics);
 
-            LogConnectionClosed(diagnostics, connection, definition);
+            if (diagnostics.ShouldLog(definition))
+            {
+                loggingOccurred = true;
+
+                definition.Log(
+                    diagnostics,
+                    connection.DbConnection.Database, connection.DbConnection.DataSource);
+            }
 
             if (diagnostics.NeedsEventData<IDbConnectionInterceptor>(
                 definition, out var interceptor, out var diagnosticSourceEnabled, out var simpleLogEnabled))
             {
+                loggingOccurred = true;
+
                 var eventData = BroadcastCollectionClosed(
                     diagnostics,
                     connection,
@@ -1680,19 +1768,6 @@ namespace Microsoft.EntityFrameworkCore.Diagnostics
             diagnostics.DispatchEventData(definition, eventData, diagnosticSourceEnabled, simpleLogEnabled);
 
             return eventData;
-        }
-
-        private static void LogConnectionClosed(
-            IDiagnosticsLogger<DbLoggerCategory.Database.Connection> diagnostics,
-            IRelationalConnection connection,
-            EventDefinition<string, string> definition)
-        {
-            if (diagnostics.ShouldLog(definition))
-            {
-                definition.Log(
-                    diagnostics,
-                    connection.DbConnection.Database, connection.DbConnection.DataSource);
-            }
         }
 
         private static string ConnectionClosed(EventDefinitionBase definition, EventData payload)
@@ -3800,6 +3875,7 @@ namespace Microsoft.EntityFrameworkCore.Diagnostics
         /// <param name="readCount"> The number of records that were read. </param>
         /// <param name="startTime"> The time that the operation was started. </param>
         /// <param name="duration"> The elapsed time from when the operation was started. </param>
+        /// <param name="loggingOccurred"> Whether logging took place via any of the supported logging mechanisms. </param>
         /// <returns> The result of execution, which may have been modified by an interceptor. </returns>
         public static InterceptionResult DataReaderDisposing(
             [NotNull] this IDiagnosticsLogger<DbLoggerCategory.Database.Command> diagnostics,
@@ -3810,18 +3886,25 @@ namespace Microsoft.EntityFrameworkCore.Diagnostics
             int recordsAffected,
             int readCount,
             DateTimeOffset startTime,
-            TimeSpan duration)
+            TimeSpan duration,
+            out bool loggingOccurred)
         {
+            loggingOccurred = false;
+
             var definition = RelationalResources.LogDisposingDataReader(diagnostics);
 
             if (diagnostics.ShouldLog(definition))
             {
+                loggingOccurred = true;
+
                 definition.Log(diagnostics);
             }
 
             if (diagnostics.NeedsEventData<IDbCommandInterceptor>(
                 definition, out var interceptor, out var diagnosticSourceEnabled, out var simpleLogEnabled))
             {
+                loggingOccurred = true;
+
                 var eventData = new DataReaderDisposingEventData(
                     definition,
                     (d, p) => ((EventDefinition)d).GenerateMessage(),

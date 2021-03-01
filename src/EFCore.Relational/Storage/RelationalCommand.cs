@@ -30,6 +30,13 @@ namespace Microsoft.EntityFrameworkCore.Storage
         private readonly RelationalDataReader _relationalReader;
         private readonly Stopwatch _stopwatch = new();
 
+        private bool _executeReaderLoggingEnabled;
+        private bool _createCommandLoggingEnabled;
+        private DateTimeOffset _executeReaderLoggingEnabledExpiration;
+        private DateTimeOffset _createCommandLoggingEnabledExpiration;
+
+        private static readonly TimeSpan _oneSecond = TimeSpan.FromSeconds(1);
+
         /// <summary>
         ///     <para>
         ///         Constructs a new <see cref="RelationalCommand" />.
@@ -493,37 +500,48 @@ namespace Microsoft.EntityFrameworkCore.Storage
             var logger = parameterObject.Logger;
             var detailedErrorsEnabled = parameterObject.DetailedErrorsEnabled;
 
-            var commandId = Guid.NewGuid();
+            var startTime = DateTimeOffset.UtcNow;
+
+            var executeReaderLoggingEnabled =
+                (_executeReaderLoggingEnabled || startTime > _executeReaderLoggingEnabledExpiration) && logger is not null;
+
+            var createCommandLoggingEnabled =
+                (_createCommandLoggingEnabled || startTime > _createCommandLoggingEnabledExpiration) && logger is not null;
+
+            // Guid.NewGuid is expensive, do it only if needed
+            var commandId = executeReaderLoggingEnabled || createCommandLoggingEnabled
+                ? Guid.NewGuid()
+                : default;
+
             var command = CreateDbCommand(parameterObject, commandId, DbCommandMethod.ExecuteReader);
 
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
-            var startTime = DateTimeOffset.UtcNow;
-            _stopwatch.Restart();
-
             var readerOpen = false;
             DbDataReader reader;
+
             try
             {
-                var interceptionResult = logger == null
-                    ? default
-                    : await logger.CommandReaderExecutingAsync(
+                if (executeReaderLoggingEnabled)
+                {
+                    _stopwatch.Restart();
+
+                    var interceptionResult = await logger!.CommandReaderExecutingAsync(
                             connection,
                             command,
                             context,
                             commandId,
                             connection.ConnectionId,
                             startTime,
+                            out var readerExecutingLoggingOccurred,
                             cancellationToken)
                         .ConfigureAwait(false);
 
-                reader = interceptionResult.HasResult
-                    ? interceptionResult.Result
-                    : await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+                    reader = interceptionResult.HasResult
+                        ? interceptionResult.Result
+                        : await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
-                if (logger != null)
-                {
-                    reader = await logger.CommandReaderExecutedAsync(
+                    reader = await logger!.CommandReaderExecutedAsync(
                             connection,
                             command,
                             context,
@@ -532,8 +550,19 @@ namespace Microsoft.EntityFrameworkCore.Storage
                             reader,
                             startTime,
                             _stopwatch.Elapsed,
+                            out var readerExecutedLoggingOccurred,
                             cancellationToken)
                         .ConfigureAwait(false);
+
+                    if (!readerExecutingLoggingOccurred && !readerExecutedLoggingOccurred)
+                    {
+                        _executeReaderLoggingEnabled = false;
+                        _executeReaderLoggingEnabledExpiration = DateTimeOffset.UtcNow + _oneSecond;
+                    }
+                }
+                else
+                {
+                    reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
                 }
             }
             catch (Exception exception)
@@ -549,7 +578,7 @@ namespace Microsoft.EntityFrameworkCore.Storage
                             connection.ConnectionId,
                             exception,
                             startTime,
-                            _stopwatch.Elapsed,
+                            DateTimeOffset.UtcNow - startTime,
                             cancellationToken)
                         .ConfigureAwait(false);
                 }
@@ -606,19 +635,33 @@ namespace Microsoft.EntityFrameworkCore.Storage
             var connectionId = connection.ConnectionId;
 
             var startTime = DateTimeOffset.UtcNow;
-            _stopwatch.Restart();
 
-            var interceptionResult = logger?.CommandCreating(connection, commandMethod, context, commandId, connectionId, startTime)
-                ?? default;
+            DbCommand command;
 
-            var command = interceptionResult.HasResult
-                ? interceptionResult.Result
-                : connection.DbConnection.CreateCommand();
-
-            if (logger != null)
+            if (!_createCommandLoggingEnabled && startTime < _createCommandLoggingEnabledExpiration || logger is null)
             {
+                command = connection.DbConnection.CreateCommand();
+            }
+            else
+            {
+                _stopwatch.Restart();
+
+                var interceptionResult = logger.CommandCreating(
+                    connection, commandMethod, context, commandId, connectionId, startTime, out var creatingLoggingOccurred);
+
+                command = interceptionResult.HasResult
+                    ? interceptionResult.Result
+                    : connection.DbConnection.CreateCommand();
+
                 command = logger.CommandCreated(
-                    connection, command, commandMethod, context, commandId, connectionId, startTime, _stopwatch.Elapsed);
+                    connection, command, commandMethod, context, commandId, connectionId, startTime, _stopwatch.Elapsed,
+                    out var createdLoggingOccurred);
+
+                if (!creatingLoggingOccurred && !createdLoggingOccurred)
+                {
+                    _createCommandLoggingEnabled = false;
+                    _createCommandLoggingEnabledExpiration = DateTimeOffset.UtcNow + _oneSecond;
+                }
             }
 
             command.CommandText = CommandText;

@@ -35,9 +35,14 @@ namespace Microsoft.EntityFrameworkCore.Storage
         private DateTimeOffset _startTime;
         private readonly Stopwatch _stopwatch = new();
 
+        private bool _disposingLoggingEnabled;
+        private DateTimeOffset _disposingLoggingEnabledExpiration;
+
         private int _readCount;
 
         private bool _disposed;
+
+        private static readonly TimeSpan _oneSecond = TimeSpan.FromSeconds(1);
 
         /// <summary>
         ///     Initializes a new instance of the <see cref="RelationalDataReader" /> class.
@@ -73,8 +78,8 @@ namespace Microsoft.EntityFrameworkCore.Storage
             _reader = reader;
             _commandId = commandId;
             _logger = logger;
-            _startTime = DateTimeOffset.UtcNow;
             _disposed = false;
+            _startTime = DateTimeOffset.UtcNow;
             _stopwatch.Restart();
         }
 
@@ -135,7 +140,8 @@ namespace Microsoft.EntityFrameworkCore.Storage
                             _reader.RecordsAffected,
                             _readCount,
                             _startTime,
-                            _stopwatch.Elapsed); // can throw
+                            _stopwatch.Elapsed,
+                            out var loggingOccurred); // can throw
                     }
                 }
                 finally
@@ -165,7 +171,8 @@ namespace Microsoft.EntityFrameworkCore.Storage
                 {
                     await _reader.CloseAsync().ConfigureAwait(false); // can throw
 
-                    if (_logger != null)
+                    if (_logger is not null
+                        && (_disposingLoggingEnabled || DateTimeOffset.UtcNow < _disposingLoggingEnabledExpiration))
                     {
                         interceptionResult = _logger.DataReaderDisposing(
                             _relationalConnection,
@@ -175,7 +182,14 @@ namespace Microsoft.EntityFrameworkCore.Storage
                             _reader.RecordsAffected,
                             _readCount,
                             _startTime,
-                            _stopwatch.Elapsed); // can throw
+                            _stopwatch.Elapsed,
+                            out var loggingOccurred); // can throw
+
+                        if (!loggingOccurred)
+                        {
+                            _disposingLoggingEnabled = false;
+                            _disposingLoggingEnabledExpiration = DateTimeOffset.UtcNow + _oneSecond;
+                        }
                     }
                 }
                 finally

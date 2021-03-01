@@ -50,6 +50,13 @@ namespace Microsoft.EntityFrameworkCore.Storage
         private IRelationalCommand? _cachedRelationalCommand;
         private readonly Stopwatch _stopwatch = new();
 
+        private bool _openLoggingEnabled;
+        private bool _closeLoggingEnabled;
+        private DateTimeOffset _openLoggingEnabledExpiration;
+        private DateTimeOffset _closeLoggingEnabledExpiration;
+
+        private static readonly TimeSpan _oneSecond = TimeSpan.FromSeconds(1);
+
         /// <summary>
         ///     Initializes a new instance of the <see cref="RelationalConnection" /> class.
         /// </summary>
@@ -731,21 +738,37 @@ namespace Microsoft.EntityFrameworkCore.Storage
         private async Task OpenInternalAsync(bool errorsExpected, CancellationToken cancellationToken)
         {
             var startTime = DateTimeOffset.UtcNow;
-            _stopwatch.Restart();
-
-            var interceptionResult
-                = await Dependencies.ConnectionLogger.ConnectionOpeningAsync(this, startTime, cancellationToken)
-                    .ConfigureAwait(false);
 
             try
             {
-                if (!interceptionResult.IsSuppressed)
+                if (!_openLoggingEnabled && startTime < _openLoggingEnabledExpiration)
                 {
                     await OpenDbConnectionAsync(errorsExpected, cancellationToken).ConfigureAwait(false);
                 }
+                else
+                {
+                    _stopwatch.Restart();
 
-                await Dependencies.ConnectionLogger.ConnectionOpenedAsync(this, startTime, _stopwatch.Elapsed, cancellationToken)
-                    .ConfigureAwait(false);
+                    var interceptionResult
+                        = await Dependencies.ConnectionLogger.ConnectionOpeningAsync(
+                                this, startTime, cancellationToken, out var openingLoggingOccurred)
+                            .ConfigureAwait(false);
+
+                    if (!interceptionResult.IsSuppressed)
+                    {
+                        await OpenDbConnectionAsync(errorsExpected, cancellationToken).ConfigureAwait(false);
+                    }
+
+                    await Dependencies.ConnectionLogger.ConnectionOpenedAsync(
+                            this, startTime, _stopwatch.Elapsed, out var isOpenedLoggingEnabled, cancellationToken)
+                        .ConfigureAwait(false);
+
+                    if (!openingLoggingOccurred && !isOpenedLoggingEnabled)
+                    {
+                        _openLoggingEnabled = false;
+                        _openLoggingEnabledExpiration = DateTimeOffset.UtcNow + _oneSecond;
+                    }
+                }
             }
             catch (Exception e)
             {
@@ -753,7 +776,7 @@ namespace Microsoft.EntityFrameworkCore.Storage
                         this,
                         e,
                         startTime,
-                        _stopwatch.Elapsed,
+                        DateTimeOffset.UtcNow - startTime,
                         errorsExpected,
                         cancellationToken)
                     .ConfigureAwait(false);
@@ -905,25 +928,43 @@ namespace Microsoft.EntityFrameworkCore.Storage
                 if (DbConnectionState != ConnectionState.Closed)
                 {
                     var startTime = DateTimeOffset.UtcNow;
-                    _stopwatch.Restart();
-
-                    var interceptionResult = await Dependencies.ConnectionLogger.ConnectionClosingAsync(this, startTime)
-                        .ConfigureAwait(false);
 
                     try
                     {
-                        if (!interceptionResult.IsSuppressed)
+                        if (!_closeLoggingEnabled && startTime < _closeLoggingEnabledExpiration)
                         {
                             await CloseDbConnectionAsync().ConfigureAwait(false);
+
+                            wasClosed = true;
                         }
+                        else
+                        {
+                            _stopwatch.Restart();
 
-                        wasClosed = true;
+                            var interceptionResult = await Dependencies.ConnectionLogger.ConnectionClosingAsync(
+                                    this, startTime, out var closingLoggingOccurred)
+                                .ConfigureAwait(false);
 
-                        await Dependencies.ConnectionLogger.ConnectionClosedAsync(
-                                this,
-                                startTime,
-                                _stopwatch.Elapsed)
-                            .ConfigureAwait(false);
+                            if (!interceptionResult.IsSuppressed)
+                            {
+                                await CloseDbConnectionAsync().ConfigureAwait(false);
+                            }
+
+                            wasClosed = true;
+
+                            await Dependencies.ConnectionLogger.ConnectionClosedAsync(
+                                    this,
+                                    startTime,
+                                    _stopwatch.Elapsed,
+                                    out var closedLoggingOccurred)
+                                .ConfigureAwait(false);
+
+                            if (!closingLoggingOccurred && !closedLoggingOccurred)
+                            {
+                                _closeLoggingEnabled = false;
+                                _closeLoggingEnabledExpiration = DateTimeOffset.UtcNow + _oneSecond;
+                            }
+                        }
                     }
                     catch (Exception e)
                     {
@@ -931,7 +972,7 @@ namespace Microsoft.EntityFrameworkCore.Storage
                                 this,
                                 e,
                                 startTime,
-                                _stopwatch.Elapsed,
+                                DateTimeOffset.UtcNow - startTime,
                                 false)
                             .ConfigureAwait(false);
 
